@@ -1,8 +1,8 @@
 /*
- * JTL Item v2.0 - http://apex.world/plugins/
+ * JTL Item v1.1 - http://apex.world/plugins/
  *
  * Licensed under MIT License (MIT)
- * Jorge Rimblas © 2017
+ * Jorge Rimblas © 2017-2020
 */
 
 $.widget( "tk.jtl_item", {
@@ -12,11 +12,43 @@ $.widget( "tk.jtl_item", {
      lang: "en",
      lang_codes: ["en","fr","es"],
      messages: null,
+     itemName: '',
      fieldSize: 30,
      fieldRows: 5,
      fieldMaxLength: 80,
      dialogTitle: null
   },
+
+  _ig$: null,
+  _grid: null,
+
+  _topApex: apex.util.getTopApex(),
+
+  _initGridConfig: function () {
+    var uiw = this;
+console.log("_initGridConfig");
+    uiw._ig$ = uiw._item$.closest('.a-IG');
+
+    if (uiw._ig$.length > 0) {
+      uiw._grid = uiw._ig$.interactiveGrid('getViews').grid;
+    }
+  },
+
+  _resetFocus: function () {
+    var uiw = this;
+    if (this._grid) {
+      var recordId = this._grid.model.getRecordId(this._grid.view$.grid('getSelectedRecords')[0]);
+      var column = this._ig$.interactiveGrid('option').config.columns.filter(function (column) {
+        return column.staticId === uiw.options.itemName;
+      })[0];
+      this._grid.view$.grid('gotoCell', recordId, column.name);
+      this._grid.focus();
+    } else {
+      // this._item$.focus();
+      uiw._elements.$displayInput.focus();
+    }
+  },
+
   _createPrivateStorage: function() {
      var uiw = this;
 
@@ -32,7 +64,6 @@ $.widget( "tk.jtl_item", {
         messages: $.parseJSON(uiw.options.messages),
         totalLanguages: 0,
         disabled: false,
-        focusOnClose: 'BUTTON', //BUTTON or INPUT,
         newRecord: false,
         signalChange: false
      };
@@ -41,7 +72,6 @@ $.widget( "tk.jtl_item", {
         $window: {},
         $document: {},
         $body: {},
-        $hiddenInput: {},
         $displayInput: {},
         $fieldset: {},
         $mlsButton: {},
@@ -56,6 +86,10 @@ $.widget( "tk.jtl_item", {
     var uiw = this;
 
     // Options are already merged and stored in this.options (or uiw.options)
+console.log("_create");
+console.log(uiw.options.itemName);
+
+    uiw._item$ = $('#' + uiw.options.itemName);
 
     // helper function for finding the position of our current displayed language
     function language_index (j, l) {
@@ -70,7 +104,7 @@ $.widget( "tk.jtl_item", {
     }
 
     uiw._createPrivateStorage();
-    uiw._values.apexItemId = $(uiw.element).attr('id');
+    uiw._values.apexItemId = uiw.options.itemName;
     uiw._values.controlsId = uiw._values.apexItemId + '_fieldset';
     uiw._initElements();
     uiw._initBaseElements();
@@ -94,15 +128,41 @@ $.widget( "tk.jtl_item", {
     uiw._elements.$mlsButton
        .bind('click', {uiw: uiw}, uiw._handleOpenClick);
 
-    apex.debug.message(4,"Registering with apex.widget.initPageItem: " + uiw._elements.$displayInput.attr('id'));
+    apex.debug.message(4,"Registering with apex.widget.initPageItem: " + uiw._elements.itemName);
 
-    apex.widget.initPageItem(uiw._elements.$hiddenInput.attr('id'), {
-       setValue: function(value, displayValue) {
-          uiw._elements.$displayInput.val(displayValue);
-          uiw._syncHiddenField();
+    // Init APEX pageitem functions
+    uiw._initApexItem();
+  },
+
+  _initApexItem: function () {
+    var uiw = this;
+
+    // Set and get value via apex functions
+    apex.item.create(uiw.options.itemName, {
+
+       setValue: function(pValue, pDisplayValue) {
+
+console.log("setValue:", pValue, pDisplayValue);
+
+        if (pDisplayValue || !pValue || pValue.length === 0) {
+console.log("empty pValue");
+          uiw._elements.$displayInput(pDisplayValue);
+          uiw._values.dataJSON = pValue;
+          uiw.element.data("value", pValue);
+        } else {
+console.log("NOT empty pValue");
+          uiw._elements.$displayInput(pDisplayValue);
+          // self._disableChangeEvent = true
+          // self._setValueBasedOnDisplay(pValue)
+          uiw._values.dataJSON = pValue;
+          uiw.element.data("value", pValue);
+        }
+
+        uiw._syncHiddenField();
+
        },
        getValue: function() {
-          return uiw._elements.$hiddenInput.val();
+          return JSON.stringify(uiw.element.data("value"));
        },
        setFocus: function() {
           uiw._elements.$displayInput.focus();
@@ -120,6 +180,10 @@ $.widget( "tk.jtl_item", {
           uiw.disable();
        }
     });
+
+    apex.item(uiw.options.itemName).callbacks.displayValueFor = function () {
+      return uiw._elements.$displayInput.val();
+    };
 
   },
   _initElements: function() {
@@ -143,8 +207,8 @@ $.widget( "tk.jtl_item", {
   _initBaseElements: function() {
      var uiw = this;
 
-     uiw._elements.$hiddenInput = uiw.element;
-     uiw._elements.$displayInput = $('#' + uiw._values.apexItemId + '_DISPLAY');     
+console.log("element", uiw.element);
+     uiw._elements.$displayInput = $('#' + uiw._values.apexItemId);     
      uiw._values.fieldSize = uiw.options.itemType === "TEXT"? uiw._elements.$displayInput.attr("size") : uiw._elements.$displayInput.attr("cols");
      if (uiw.options.itemType === "TEXTAREA") {
        uiw._values.fieldRows = uiw._elements.$displayInput.attr("rows");
@@ -152,19 +216,16 @@ $.widget( "tk.jtl_item", {
      uiw._values.fieldMaxLength = uiw._elements.$displayInput.attr("maxlength");
 
      uiw._elements.$fieldset = $('#' + uiw._values.controlsId);
-     uiw._elements.$mlsButton =
-        uiw._elements.$fieldset.find('button.jtlitem-modal-open');
+     uiw._elements.$mlsButton = uiw._elements.$fieldset.find('button.jtlitem-modal-open');
   },
   _initDataJSON: function(){
      var uiw = this,
          jsonData = [],
-         input_data = uiw._elements.$hiddenInput.val();
+         input_data = uiw.element.data("value") || {};
+console.log({input_data});
 
-     if (input_data) {
-        uiw._values.dataJSON = JSON.parse(input_data);
-        uiw._values.newRecord = false;
-     }
-     else {
+     if (apex.jQuery.isEmptyObject(input_data)) {
+console.log("empty value");
         // The record is empty so we build a 
         // build JSON with this structure to seed it:
         //  [ {"l": "us", "tl": "Project Analysis"}
@@ -173,10 +234,17 @@ $.widget( "tk.jtl_item", {
         uiw._values.languages.forEach(function(l) {
            jsonData.push({"l": l, "tl": ""});
         });
-        // Init the hidden item
-        uiw._elements.$hiddenInput.val(JSON.stringify(jsonData));
+        // Init the value
+        // uiw.element.data("value", JSON.stringify(jsonData));
+        uiw.element.data("value", jsonData);
         uiw._values.dataJSON = jsonData;
         uiw._values.newRecord = true;
+     }
+     else {
+       // uiw._values.dataJSON = JSON.parse(input_data);
+console.log("have a value");
+       uiw._values.dataJSON = input_data;
+       uiw._values.newRecord = false;
      }
 
   },
@@ -207,8 +275,8 @@ $.widget( "tk.jtl_item", {
         // save the new text into the JSON structure
         uiw._values.dataJSON[lang_index].tl = uiw._elements.$displayInput.val();
      }
-     // place the full JSON back into the hidden item
-     uiw._elements.$hiddenInput.val(JSON.stringify(uiw._values.dataJSON));
+     // place the full JSON back into the data-value attribute
+     uiw.element.data("value", uiw._values.dataJSON);
      // Keep the map fresh (only needed for the dialog)
      uiw._initLanguageMap();
   },
@@ -231,6 +299,8 @@ $.widget( "tk.jtl_item", {
          display_value;
 
      uiw._elements.$dialogContent.find('.jtlitem-value').each(function(i,el){
+        // loop through all dialog elements and store translations
+        // back into the dataJSON structure
         apex.debug.message(4,i + "(" + el.dataset.lang + "):" + el.value);
         uiw._values.dataJSON[i].l = el.dataset.lang;
         uiw._values.dataJSON[i].tl = el.value;
@@ -243,19 +313,18 @@ $.widget( "tk.jtl_item", {
 
      // sync the items again
      uiw._elements.$displayInput.val(display_value);
-     uiw._elements.$hiddenInput.val(JSON.stringify(uiw._values.dataJSON));
+     uiw.element.data("value", uiw._values.dataJSON);
      // uiw._signalChange();  // does the .val trigger a change already?
+     // we're done "saving" back from the dialog, clear the newRecord flag
      uiw._values.newRecord = false;
 
      uiw._elements.$dialog.dialog('close'); // this should cascade to remove the dialog
   },
   _signalChange: function() {
      var uiw = this,
-        hiddenElmt = uiw._elements.$hiddenInput[0],  // Do we use [0] or jquery object?
         displayElmt = uiw._elements.$displayInput[0];
 
      //Need apex.jQuery for the events to register with the DA framework
-     apex.jQuery(hiddenElmt).trigger('change');
      apex.jQuery(displayElmt).trigger('change');
   },
   _handleOpenClick: function(eventObj) {
@@ -287,6 +356,9 @@ $.widget( "tk.jtl_item", {
          langTable,
          curr_lang = uiw._values.curr_lang_index,
          dialogHtml;
+
+    uiw._initGridConfig();
+console.log("_grid:", uiw._grid);
 
      langTable = 
            '<table class="t-Report-report" summary="Available Translations">\n' +
@@ -336,9 +408,9 @@ $.widget( "tk.jtl_item", {
            '  </div>\n' +
            '</div></div>\n';
 
-      uiw._elements.$body.append(dialogHtml);
+     uiw._elements.$body.append(dialogHtml);
 
-      uiw._initElements();
+     uiw._initElements();
 
      // open created div as a dialog
      uiw._elements.$dialog.dialog({
@@ -352,6 +424,7 @@ $.widget( "tk.jtl_item", {
          modal:         true,
          position:      { my: "left", at: "left center", of: uiw._elements.$displayInput[0] },
          open: function() {
+            // uiw._topApex.navigation.beginFreezeScroll();
             uiw._initDialogElements();
             uiw._initDialogButtons();
             uiw._elements.$dialogContent.find('input').first().focus();
@@ -361,14 +434,17 @@ $.widget( "tk.jtl_item", {
             $(this).dialog('destroy');
             uiw._elements.$dialog.remove();
             uiw._elements.$document.find('div.jtlitem-dialog').remove();
+            // uiw._topApex.navigation.endFreezeScroll();
 
-            if (uiw._values.focusOnClose === 'BUTTON') {
-               uiw._elements.$mlsButton.focus();
-            } else if (uiw._values.focusOnClose === 'INPUT') {
-               uiw._elements.$displayInput.focus();
-            }
 
-            uiw._values.focusOnClose = 'BUTTON';
+            // if (uiw._values.focusOnClose === 'BUTTON') {
+            //    uiw._elements.$mlsButton.focus();
+            // } else if (uiw._values.focusOnClose === 'INPUT') {
+            //    uiw._elements.$displayInput.focus();
+            // }
+
+            // uiw._values.focusOnClose = 'BUTTON';
+            uiw._resetFocus();
          }
        })
        .on('keydown', function(evt) {
@@ -386,7 +462,6 @@ $.widget( "tk.jtl_item", {
      if (uiw._values.disabled === false) {
         uiw._elements.$displayInput
            .attr('disabled','disabled');
-        uiw._elements.$hiddenInput.attr('disabled','disabled');
 
         uiw._elements.$mlsButton
            .attr('disabled','disabled')
@@ -400,7 +475,6 @@ $.widget( "tk.jtl_item", {
 
      if (uiw._values.disabled === true) {
        uiw._elements.$displayInput.removeAttr('disabled');
-       uiw._elements.$hiddenInput.removeAttr('disabled');
        uiw._elements.$mlsButton
           .removeAttr('disabled')
           .bind('click', {uiw: uiw}, uiw._handleOpenClick);
